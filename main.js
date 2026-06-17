@@ -15,6 +15,10 @@ const TARGETS = {
     local: new THREE.Vector3(-0.26, 0.34, 0),
     catchRadius: 0.18,
     catchDirection: new THREE.Vector3(-1, 0, 0),
+    seatOffset: new THREE.Vector3(-0.13, 0.05, 0.01),
+    seatRadius: 0.26,
+    seatTolerance: 0.1,
+    seatHeight: 0.12,
     releaseOffset: new THREE.Vector3(-0.02, 0.08, 0.02),
     score: 1,
     color: 0xf2a65a,
@@ -24,6 +28,10 @@ const TARGETS = {
     local: new THREE.Vector3(0.26, 0.3, 0),
     catchRadius: 0.15,
     catchDirection: new THREE.Vector3(1, 0, 0),
+    seatOffset: new THREE.Vector3(0.13, 0.04, 0.01),
+    seatRadius: 0.22,
+    seatTolerance: 0.09,
+    seatHeight: 0.1,
     releaseOffset: new THREE.Vector3(0.02, 0.08, 0.01),
     score: 1,
     color: 0x6ed7ff,
@@ -33,6 +41,10 @@ const TARGETS = {
     local: new THREE.Vector3(0, 0.64, 0),
     catchRadius: 0.11,
     catchDirection: new THREE.Vector3(0, 1, 0),
+    seatOffset: new THREE.Vector3(0, 0.16, 0),
+    seatRadius: 0.09,
+    seatTolerance: 0.07,
+    seatHeight: 0.14,
     releaseOffset: new THREE.Vector3(0, 0.11, 0),
     score: 3,
     color: 0x83f0b1,
@@ -279,6 +291,7 @@ const tmpVecA = new THREE.Vector3();
 const tmpVecB = new THREE.Vector3();
 const tmpVecC = new THREE.Vector3();
 const tmpVecD = new THREE.Vector3();
+const tmpVecE = new THREE.Vector3();
 const tmpQuat = new THREE.Quaternion();
 
 const gravity = new THREE.Vector3(0, -9.8, 0);
@@ -425,13 +438,29 @@ function syncWorldTransforms() {
   kendama.updateMatrixWorld(true);
 }
 
-function catchBall(id) {
+function getSeatWorld(id, out = targetWorld) {
   const target = TARGETS[id];
-  syncWorldTransforms();
-  const world = getTargetWorld(id, tmpVecA);
-  ballPos.copy(world).add(target.releaseOffset.clone().applyQuaternion(handle.quaternion));
+  out.copy(target.local).add(target.seatOffset);
+  handle.localToWorld(out);
+  return out;
+}
+
+function alignBallToSeat(id) {
+  const target = TARGETS[id];
+  const seat = getSeatWorld(id, tmpVecA);
+  ballPos.copy(seat);
+  if (id === 'spike') {
+    ballPos.add(tmpVecB.set(0, target.seatHeight, 0).applyQuaternion(handle.quaternion));
+  }
   ballVel.copy(anchorVelocity);
   ballLocalVelocity.set(0, 0, 0);
+}
+
+function catchBall(id) {
+  syncWorldTransforms();
+  const target = TARGETS[id];
+  const world = getSeatWorld(id, tmpVecA);
+  alignBallToSeat(id);
   state.catchMode = 'caught';
   state.caughtTargetId = id;
   state.lockCatch = 0.45;
@@ -464,8 +493,7 @@ function releaseBall(strength = 1) {
   ballVel.z += -handle.rotation.x * 0.6;
 
   if (target && state.catchMode === 'caught') {
-    const world = getTargetWorld(state.caughtTargetId, tmpVecA);
-    ballPos.copy(world).add(target.releaseOffset.clone().applyQuaternion(handle.quaternion));
+    ballPos.copy(getSeatWorld(state.caughtTargetId, tmpVecA));
   }
 
   state.catchMode = 'string';
@@ -484,10 +512,10 @@ function resetGame() {
   handleTargetX = 0.1;
   handleTargetZ = -0.22;
   handle.rotation.set(handleTargetX, 0.45, handleTargetZ);
-  ballPos.set(0.12, -0.16, 0.06);
+  syncWorldTransforms();
+  ballPos.copy(getSeatWorld(state.targetId, tmpVecA));
   ballVel.set(0.3, 0.2, -0.1);
   ballLocalVelocity.set(0, 0, 0);
-  syncWorldTransforms();
   handle.localToWorld(anchorWorld.copy(anchorLocal));
   prevAnchorWorld.copy(anchorWorld);
   updateHud();
@@ -612,10 +640,7 @@ function updateBallPhysics(dt) {
   anchorVelocity.copy(anchorWorld).sub(prevAnchorWorld).divideScalar(Math.max(dt, 0.016));
 
   if (state.catchMode === 'caught') {
-    const target = TARGETS[state.caughtTargetId];
-    const caught = getTargetWorld(state.caughtTargetId, tmpVecA);
-    ballPos.copy(caught).add(target.releaseOffset.clone().applyQuaternion(handle.quaternion));
-    ballVel.copy(anchorVelocity);
+    alignBallToSeat(state.caughtTargetId);
     prevAnchorWorld.copy(anchorWorld);
     return;
   }
@@ -653,14 +678,16 @@ function updateBallPhysics(dt) {
     const localVelocity = tmpVecB.copy(ballVel).applyQuaternion(handleQuat);
     for (const id of targetIds) {
       const target = TARGETS[id];
-      const distance = ballHandleLocal.distanceTo(target.local);
+      const seat = tmpVecE.copy(target.local).add(target.seatOffset);
+      const distance = ballHandleLocal.distanceTo(seat);
       const approach = localVelocity.dot(target.catchDirection);
-      const openingDepth = tmpVecD.copy(ballHandleLocal).sub(target.local).dot(target.catchDirection);
+      const openingDepth = tmpVecD.copy(ballHandleLocal).sub(seat).dot(target.catchDirection);
       const speed = ballVel.length();
-      const catchWindow = target.catchRadius + (id === 'spike' ? 0.01 : 0.03);
-      const isFacingOpening = openingDepth > 0.02 && openingDepth < 0.42;
-      const isApproaching = approach < 1.8;
-      if (distance < catchWindow && isFacingOpening && isApproaching && speed < 8.2) {
+      const catchWindow = target.seatRadius;
+      const isFacingOpening = openingDepth > -target.seatTolerance && openingDepth < target.seatTolerance;
+      const isApproaching = approach < 2.2;
+      const isWithinHeight = Math.abs(ballHandleLocal.y - seat.y) < target.seatHeight;
+      if (distance < catchWindow && isFacingOpening && isApproaching && isWithinHeight && speed < 8.8) {
         catchBall(id);
         break;
       }
