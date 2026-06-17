@@ -14,6 +14,7 @@ const TARGETS = {
     label: '大皿',
     local: new THREE.Vector3(-0.26, 0.34, 0),
     catchRadius: 0.18,
+    catchDirection: new THREE.Vector3(-1, 0, 0),
     releaseOffset: new THREE.Vector3(-0.02, 0.08, 0.02),
     score: 1,
     color: 0xf2a65a,
@@ -22,6 +23,7 @@ const TARGETS = {
     label: '小皿',
     local: new THREE.Vector3(0.26, 0.3, 0),
     catchRadius: 0.15,
+    catchDirection: new THREE.Vector3(1, 0, 0),
     releaseOffset: new THREE.Vector3(0.02, 0.08, 0.01),
     score: 1,
     color: 0x6ed7ff,
@@ -30,6 +32,7 @@ const TARGETS = {
     label: 'けん先',
     local: new THREE.Vector3(0, 0.64, 0),
     catchRadius: 0.11,
+    catchDirection: new THREE.Vector3(0, 1, 0),
     releaseOffset: new THREE.Vector3(0, 0.11, 0),
     score: 3,
     color: 0x83f0b1,
@@ -266,10 +269,16 @@ const anchorLocal = new THREE.Vector3(0, 0.96, 0);
 const ballPos = new THREE.Vector3(0, -0.15, 0);
 const ballVel = new THREE.Vector3(0.8, 0, -0.2);
 const anchorWorld = new THREE.Vector3();
+const prevAnchorWorld = new THREE.Vector3();
+const anchorVelocity = new THREE.Vector3();
+const ballLocal = new THREE.Vector3();
+const ballLocalVelocity = new THREE.Vector3();
+const ballHandleLocal = new THREE.Vector3();
 const targetWorld = new THREE.Vector3();
 const tmpVecA = new THREE.Vector3();
 const tmpVecB = new THREE.Vector3();
 const tmpVecC = new THREE.Vector3();
+const tmpVecD = new THREE.Vector3();
 const tmpQuat = new THREE.Quaternion();
 
 const gravity = new THREE.Vector3(0, -9.8, 0);
@@ -421,7 +430,8 @@ function catchBall(id) {
   syncWorldTransforms();
   const world = getTargetWorld(id, tmpVecA);
   ballPos.copy(world).add(target.releaseOffset.clone().applyQuaternion(handle.quaternion));
-  ballVel.set(0, 0, 0);
+  ballVel.copy(anchorVelocity);
+  ballLocalVelocity.set(0, 0, 0);
   state.catchMode = 'caught';
   state.caughtTargetId = id;
   state.lockCatch = 0.45;
@@ -448,7 +458,7 @@ function releaseBall(strength = 1) {
     .addScaledVector(right, state.pointerVXSmoothed * 0.004)
     .addScaledVector(forward, -state.pointerVYSmoothed * 0.003);
 
-  ballVel.copy(impulse);
+  ballVel.copy(anchorVelocity).add(impulse);
   ballVel.y += 0.9 * strength;
   ballVel.x += handle.rotation.z * 0.6;
   ballVel.z += -handle.rotation.x * 0.6;
@@ -476,6 +486,10 @@ function resetGame() {
   handle.rotation.set(handleTargetX, 0.45, handleTargetZ);
   ballPos.set(0.12, -0.16, 0.06);
   ballVel.set(0.3, 0.2, -0.1);
+  ballLocalVelocity.set(0, 0, 0);
+  syncWorldTransforms();
+  handle.localToWorld(anchorWorld.copy(anchorLocal));
+  prevAnchorWorld.copy(anchorWorld);
   updateHud();
   setStatus('リセットした。ドラッグで振り直せる。');
 }
@@ -595,27 +609,32 @@ actionButtons.forEach((button) => {
 function updateBallPhysics(dt) {
   kendama.updateMatrixWorld(true);
   handle.localToWorld(anchorWorld.copy(anchorLocal));
+  anchorVelocity.copy(anchorWorld).sub(prevAnchorWorld).divideScalar(Math.max(dt, 0.016));
 
   if (state.catchMode === 'caught') {
     const target = TARGETS[state.caughtTargetId];
     const caught = getTargetWorld(state.caughtTargetId, tmpVecA);
     ballPos.copy(caught).add(target.releaseOffset.clone().applyQuaternion(handle.quaternion));
-    ballVel.set(0, 0, 0);
+    ballVel.copy(anchorVelocity);
+    prevAnchorWorld.copy(anchorWorld);
     return;
   }
 
-  ballVel.addScaledVector(gravity, dt);
-  ballVel.multiplyScalar(0.999);
-  ballPos.addScaledVector(ballVel, dt);
+  ballLocal.copy(ballPos).sub(anchorWorld);
+  ballLocalVelocity.copy(ballVel).sub(anchorVelocity);
 
-  const delta = ballPos.clone().sub(anchorWorld);
-  const dist = delta.length() || 0.0001;
-  const dir = delta.multiplyScalar(1 / dist);
-  const desired = anchorWorld.clone().addScaledVector(dir, stringLength);
-  ballPos.lerp(desired, 0.92);
+  ballLocalVelocity.addScaledVector(gravity, dt);
+  ballLocalVelocity.multiplyScalar(1 - 0.06 * dt);
+  ballLocal.addScaledVector(ballLocalVelocity, dt);
 
-  const radialSpeed = ballVel.dot(dir);
-  ballVel.addScaledVector(dir, -radialSpeed * 0.96);
+  const distance = ballLocal.length() || 0.0001;
+  tmpVecA.copy(ballLocal).divideScalar(distance);
+  ballLocal.copy(tmpVecA).multiplyScalar(stringLength);
+  const radialSpeed = ballLocalVelocity.dot(tmpVecA);
+  ballLocalVelocity.addScaledVector(tmpVecA, -radialSpeed);
+
+  ballPos.copy(anchorWorld).add(ballLocal);
+  ballVel.copy(ballLocalVelocity).add(anchorVelocity);
 
   const floorY = -0.88;
   if (ballPos.y < floorY + ball.geometry.parameters.radius) {
@@ -623,23 +642,32 @@ function updateBallPhysics(dt) {
     ballVel.y = Math.abs(ballVel.y) * 0.58;
     ballVel.x *= 0.92;
     ballVel.z *= 0.92;
+    ballLocal.copy(ballPos).sub(anchorWorld);
+    ballLocalVelocity.copy(ballVel).sub(anchorVelocity);
   }
 
   const targetIds = targetNames;
   if (state.lockCatch <= 0) {
+    handle.worldToLocal(ballHandleLocal.copy(ballPos));
+    const handleQuat = handle.getWorldQuaternion(tmpQuat).invert();
+    const localVelocity = tmpVecB.copy(ballVel).applyQuaternion(handleQuat);
     for (const id of targetIds) {
       const target = TARGETS[id];
-      const world = getTargetWorld(id, tmpVecA);
-      const distance = ballPos.distanceTo(world);
+      const distance = ballHandleLocal.distanceTo(target.local);
+      const approach = localVelocity.dot(target.catchDirection);
+      const openingDepth = tmpVecD.copy(ballHandleLocal).sub(target.local).dot(target.catchDirection);
       const speed = ballVel.length();
-      const upFactor = THREE.MathUtils.clamp((ballPos.y - world.y + 0.12) / 0.24, 0, 1);
-      const catchWindow = target.catchRadius + (id === 'spike' ? 0.02 : 0.05 * upFactor);
-      if (distance < catchWindow && speed < 7.6) {
+      const catchWindow = target.catchRadius + (id === 'spike' ? 0.01 : 0.03);
+      const isFacingOpening = openingDepth > 0.02 && openingDepth < 0.42;
+      const isApproaching = approach < 1.8;
+      if (distance < catchWindow && isFacingOpening && isApproaching && speed < 8.2) {
         catchBall(id);
         break;
       }
     }
   }
+
+  prevAnchorWorld.copy(anchorWorld);
 }
 
 function updateVisuals(dt) {
