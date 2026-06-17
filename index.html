@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#07111f" />
+    <title>けん玉ラボ | three.js</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="scene" aria-label="3Dけん玉シーン"></canvas>
+
+      <main id="overlay">
+        <section class="hero panel">
+          <p class="eyebrow">three.js kendama practice</p>
+          <h1>けん玉ラボ</h1>
+          <p class="lede">
+            ドラッグで傾けて、Flickで振る。大皿・小皿・けん先を狙って、
+            3Dのけん玉をそのまま遊べます。
+          </p>
+        </section>
+
+        <section class="panel hud" aria-label="スコア表示">
+          <div class="metric">
+            <span>Score</span>
+            <strong id="totalScore">0</strong>
+          </div>
+          <div class="metric">
+            <span>Combo</span>
+            <strong id="comboScore">0</strong>
+          </div>
+          <div class="metric">
+            <span>Best</span>
+            <strong id="bestScore">0</strong>
+          </div>
+          <div class="metric wide">
+            <span>Goal</span>
+            <strong id="goalLabel">大皿</strong>
+          </div>
+          <p id="status" class="status" aria-live="polite">ドラッグしてけん玉を振ってみよう。</p>
+        </section>
+
+        <section class="panel goal-panel" aria-label="狙う場所の選択">
+          <button class="pill active" type="button" data-target="bigCup">大皿</button>
+          <button class="pill" type="button" data-target="smallCup">小皿</button>
+          <button class="pill" type="button" data-target="spike">けん先</button>
+        </section>
+
+        <section class="panel action-panel" aria-label="操作ボタン">
+          <button class="action primary" type="button" data-action="flick">Flick</button>
+          <button class="action" type="button" data-action="reset">Reset</button>
+        </section>
+
+        <footer class="hint panel">
+          <span>操作</span>
+          <span>ドラッグ / Flick / Space / Rでリセット</span>
+        </footer>
+      </main>
+    </div>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
